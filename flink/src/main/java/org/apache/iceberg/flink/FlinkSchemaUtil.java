@@ -19,9 +19,18 @@
 
 package org.apache.iceberg.flink;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.api.WatermarkSpec;
+import org.apache.flink.table.descriptors.DescriptorProperties;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
@@ -48,7 +57,74 @@ import org.apache.iceberg.types.Types;
  */
 public class FlinkSchemaUtil {
 
+  public static final String SCHEMA = "schema";
+
+  public static final String DATA_TYPE = "data-type";
+
+  public static final String EXPR = "expr";
+
+  public static final String WATERMARK = "watermark";
+
+  public static final String WATERMARK_ROWTIME = "rowtime";
+
+  public static final String WATERMARK_STRATEGY = "strategy";
+
+  public static final String WATERMARK_STRATEGY_EXPR = WATERMARK_STRATEGY + '.' + EXPR;
+
+  public static final String WATERMARK_STRATEGY_DATA_TYPE = WATERMARK_STRATEGY + '.' + DATA_TYPE;
+
   private FlinkSchemaUtil() {
+  }
+
+  /**
+   * Convert the flink table schema to apache iceberg schema.
+   * @return
+   */
+  public static Map<String, String> convertWaterMark(TableSchema schema) {
+    DescriptorProperties tableSchemaProps = new DescriptorProperties(true);
+
+    if (!schema.getWatermarkSpecs().isEmpty()) {
+      final List<List<String>> watermarkValues = new ArrayList<>();
+      for (WatermarkSpec spec : schema.getWatermarkSpecs()) {
+        watermarkValues.add(Arrays.asList(
+                spec.getRowtimeAttribute(),
+                spec.getWatermarkExpr(),
+                spec.getWatermarkExprOutputType().getLogicalType().asSerializableString()));
+      }
+      tableSchemaProps.putIndexedFixedProperties(
+              SCHEMA + '.' + WATERMARK,
+              Arrays.asList(WATERMARK_ROWTIME, WATERMARK_STRATEGY_EXPR, WATERMARK_STRATEGY_DATA_TYPE),
+              watermarkValues);
+    }
+
+    return tableSchemaProps.asMap();
+  }
+
+  public static List<WatermarkSpec> convertWaterMarkByProperties(Map<String, String> properties) {
+    String watermarkPrefixKey = org.apache.flink.table.descriptors.Schema.SCHEMA + '.' + WATERMARK;
+    final int watermarkCount = properties.keySet().stream()
+            .filter(k -> k.startsWith(watermarkPrefixKey) && k.endsWith('.' + WATERMARK_ROWTIME))
+            .mapToInt(k -> 1)
+            .sum();
+    List<WatermarkSpec> watermarkSpecs = new ArrayList<>();
+    if (watermarkCount > 0) {
+      for (int i = 0; i < watermarkCount; i++) {
+        final String rowtimeKey = watermarkPrefixKey + '.' + i + '.' + WATERMARK_ROWTIME;
+        final String exprKey = watermarkPrefixKey + '.' + i + '.' + WATERMARK_STRATEGY_EXPR;
+        final String typeKey = watermarkPrefixKey + '.' + i + '.' + WATERMARK_STRATEGY_DATA_TYPE;
+
+        final String rowtime = properties.get(rowtimeKey);
+        final String exprString = properties.get(exprKey);
+        final String typeString = properties.get(typeKey);
+
+        if (rowtime == null || exprString == null || typeString == null) {
+          throw new ValidationException("Could not find required property rowtimeKey/exprKey/typeKey.");
+        }
+        final DataType exprType = TypeConversions.fromLogicalToDataType(LogicalTypeParser.parse(typeString));
+        watermarkSpecs.add(new WatermarkSpec(rowtime, exprString, exprType));
+      }
+    }
+    return watermarkSpecs;
   }
 
   /**
@@ -119,6 +195,21 @@ public class FlinkSchemaUtil {
     for (RowType.RowField field : rowType.getFields()) {
       builder.field(field.getName(), TypeConversions.fromLogicalToDataType(field.getType()));
     }
+    return builder.build();
+  }
+
+  public static TableSchema toSchema(RowType rowType, Map<String, String> properties) {
+    TableSchema.Builder builder = TableSchema.builder();
+    for (RowType.RowField field : rowType.getFields()) {
+      builder.field(field.getName(), TypeConversions.fromLogicalToDataType(field.getType()));
+    }
+
+    // load watermark
+    List<WatermarkSpec> watermarkSpecs = convertWaterMarkByProperties(properties);
+    for (WatermarkSpec watermarkSpec : watermarkSpecs) {
+      builder.watermark(watermarkSpec);
+    }
+
     return builder.build();
   }
 }

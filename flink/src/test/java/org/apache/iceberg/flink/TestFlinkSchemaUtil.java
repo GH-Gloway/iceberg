@@ -19,8 +19,11 @@
 
 package org.apache.iceberg.flink;
 
+import java.util.List;
+import java.util.Map;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.LocalZonedTimestampType;
@@ -65,6 +68,7 @@ public class TestFlinkSchemaUtil {
         .field("decimal2", DataTypes.DECIMAL(38, 2))
         .field("decimal3", DataTypes.DECIMAL(10, 1))
         .field("multiset", DataTypes.MULTISET(DataTypes.STRING().notNull()))
+        .watermark("timestampWithoutZone", "timestampWithoutZone", DataTypes.TIMESTAMP(3))
         .build();
 
     Schema icebergSchema = new Schema(
@@ -99,6 +103,9 @@ public class TestFlinkSchemaUtil {
             Types.IntegerType.get()))
     );
 
+    Map<String, String> waterMark = FlinkSchemaUtil.convertWaterMark(flinkSchema);
+    List<WatermarkSpec> watermarkSpecs = FlinkSchemaUtil.convertWaterMarkByProperties(waterMark);
+    Assert.assertEquals(1, watermarkSpecs.size());
     checkSchema(flinkSchema, icebergSchema);
   }
 

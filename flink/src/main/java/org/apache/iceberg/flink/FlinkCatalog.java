@@ -360,6 +360,7 @@ public class FlinkCatalog extends AbstractCatalog {
     validateFlinkTable(table);
 
     Schema icebergSchema = FlinkSchemaUtil.convert(table.getSchema());
+    Map<String, String> waterMarkMap = FlinkSchemaUtil.convertWaterMark(table.getSchema());
     PartitionSpec spec = toPartitionSpec(((CatalogTable) table).getPartitionKeys(), icebergSchema);
 
     ImmutableMap.Builder<String, String> properties = ImmutableMap.builder();
@@ -371,6 +372,7 @@ public class FlinkCatalog extends AbstractCatalog {
         properties.put(entry.getKey(), entry.getValue());
       }
     }
+    properties.putAll(waterMarkMap);
 
     try {
       icebergCatalog.createTable(
@@ -461,10 +463,6 @@ public class FlinkCatalog extends AbstractCatalog {
       }
     });
 
-    if (!schema.getWatermarkSpecs().isEmpty()) {
-      throw new UnsupportedOperationException("Creating table with watermark specs is not supported yet.");
-    }
-
     if (schema.getPrimaryKey().isPresent()) {
       throw new UnsupportedOperationException("Creating table with primary key is not supported yet.");
     }
@@ -533,7 +531,7 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   static CatalogTable toCatalogTable(Table table) {
-    TableSchema schema = FlinkSchemaUtil.toSchema(FlinkSchemaUtil.convert(table.schema()));
+    TableSchema schema = FlinkSchemaUtil.toSchema(FlinkSchemaUtil.convert(table.schema()), table.properties());
     List<String> partitionKeys = toPartitionKeys(table.spec(), table.schema());
 
     // NOTE: We can not create a IcebergCatalogTable extends CatalogTable, because Flink optimizer may use
