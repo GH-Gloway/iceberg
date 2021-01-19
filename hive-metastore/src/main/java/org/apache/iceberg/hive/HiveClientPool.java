@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.hive;
 
+import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -45,6 +46,9 @@ public class HiveClientPool extends ClientPool<HiveMetaStoreClient, TException> 
   public HiveClientPool(int poolSize, Configuration conf) {
     super(poolSize, TTransportException.class);
     this.hiveConf = new HiveConf(conf, HiveClientPool.class);
+    for (Map.Entry<String, String> entry : conf) {
+      hiveConf.set(entry.getKey(), entry.getValue());
+    }
   }
 
   @Override
